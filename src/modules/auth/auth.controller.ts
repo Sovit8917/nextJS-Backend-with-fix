@@ -1,7 +1,7 @@
 import { Controller, Post, Body, Get, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
-import { SendOtpDto, VerifyOtpDto } from './dto/auth.dto';
+import { SendOtpDto, VerifyOtpDto, AdminLoginDto } from './dto/auth.dto';
 import { Public, CurrentUser } from '../../common/decorators';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
@@ -24,6 +24,13 @@ export class AuthController {
     return this.authService.verifyOtp(dto);
   }
 
+  @Public()
+  @Post('admin/login')
+  @ApiOperation({ summary: 'Admin email/password login' })
+  adminLogin(@Body() dto: AdminLoginDto) {
+    return this.authService.adminLogin(dto);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('me')
   @ApiBearerAuth()
@@ -31,7 +38,6 @@ export class AuthController {
   getMe(@CurrentUser() user: any) {
     return { data: user };
   }
-  // in AuthService constructor, temporarily
 
   @UseGuards(JwtAuthGuard)
   @Post('refresh')

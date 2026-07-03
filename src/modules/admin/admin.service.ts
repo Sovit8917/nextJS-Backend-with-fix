@@ -19,7 +19,7 @@ export class AdminService {
 
     const hashed = await bcrypt.hash(password, 10);
     const admin = await this.prisma.user.create({
-      data: { phone: email, email, name, role: 'ADMIN' },
+      data: { phone: email, email, name, role: 'ADMIN', password: hashed },
     });
     return { message: 'Admin created', data: { id: admin.id, email } };
   }

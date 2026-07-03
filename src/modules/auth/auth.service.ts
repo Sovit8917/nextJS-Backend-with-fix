@@ -8,9 +8,10 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SendOtpDto, VerifyOtpDto } from './dto/auth.dto';
+import { SendOtpDto, VerifyOtpDto, AdminLoginDto } from './dto/auth.dto';
 import { Role } from '../../common/enums';
 import twilio from 'twilio';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -121,6 +122,30 @@ export class AuthService {
     });
     return !!record;
   }
+
+  async adminLogin(dto: AdminLoginDto) {
+  const admin = await this.prisma.user.findUnique({
+    where: { email: dto.email },
+  });
+
+  if (!admin || admin.role !== Role.ADMIN) {
+    throw new UnauthorizedException('Invalid email or password');
+  }
+  if (!admin.password) {
+    throw new UnauthorizedException('Invalid email or password');
+  }
+
+  const isMatch = await bcrypt.compare(dto.password, admin.password);
+  if (!isMatch) {
+    throw new UnauthorizedException('Invalid email or password');
+  }
+  if (admin.isBlocked || !admin.isActive) {
+    throw new UnauthorizedException('Account is disabled');
+  }
+
+  const token = this.generateToken(admin.id, admin.role);
+  return { message: 'Login successful', data: { token, user: admin } };
+}
 
   private generateOtp(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();

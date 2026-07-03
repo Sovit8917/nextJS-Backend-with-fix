@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsMobilePhone, IsEnum, IsOptional, Length } from 'class-validator';
+import { IsString, IsNotEmpty, IsMobilePhone, IsEnum, IsOptional, Length, IsEmail } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Role } from '../../../common/enums';
 
@@ -33,7 +33,7 @@ export class VerifyOtpDto {
 
 export class AdminLoginDto {
   @ApiProperty({ example: 'admin@example.com' })
-  @IsString()
+  @IsEmail()
   @IsNotEmpty()
   email: string;
 
