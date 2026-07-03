@@ -1,0 +1,614 @@
+{
+  "info": {
+    "name": "Home Service Marketplace API",
+    "description": "Complete API collection for Home Service Marketplace backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api/v1" },
+    { "key": "customerToken", "value": "" },
+    { "key": "workerToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "bookingId", "value": "" },
+    { "key": "workerId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Send OTP (Customer)",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/auth/send-otp",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"phone\": \"+919876543210\", \"role\": \"CUSTOMER\"}" }
+          }
+        },
+        {
+          "name": "Verify OTP (Customer)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "var json = pm.response.json();",
+            "if (json.data && json.data.token) { pm.collectionVariables.set('customerToken', json.data.token); }"
+          ]}}],
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/auth/verify-otp",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"phone\": \"+919876543210\", \"otp\": \"123456\", \"role\": \"CUSTOMER\"}" }
+          }
+        },
+        {
+          "name": "Send OTP (Worker)",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/auth/send-otp",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"phone\": \"+919876543211\", \"role\": \"WORKER\"}" }
+          }
+        },
+        {
+          "name": "Verify OTP (Worker)",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "var json = pm.response.json();",
+            "if (json.data && json.data.token) { pm.collectionVariables.set('workerToken', json.data.token); pm.collectionVariables.set('workerId', json.data.worker.id); }"
+          ]}}],
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/auth/verify-otp",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"phone\": \"+919876543211\", \"otp\": \"123456\", \"role\": \"WORKER\"}" }
+          }
+        },
+        {
+          "name": "Get Me",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/auth/me",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Get All Categories",
+          "request": { "method": "GET", "url": "{{baseUrl}}/categories" }
+        },
+        {
+          "name": "Get Category by ID",
+          "request": { "method": "GET", "url": "{{baseUrl}}/categories/:id" }
+        },
+        {
+          "name": "Create Category (Admin)",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/categories",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"name\": \"Gardening\", \"description\": \"Garden maintenance\", \"icon\": \"🌿\", \"sortOrder\": 9}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Services",
+      "item": [
+        {
+          "name": "Get All Services",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/services", "query": [
+            { "key": "categoryId", "value": "", "disabled": true },
+            { "key": "search", "value": "", "disabled": true }
+          ]}}
+        },
+        {
+          "name": "Get Popular Services",
+          "request": { "method": "GET", "url": "{{baseUrl}}/services/popular" }
+        },
+        {
+          "name": "Get Service by ID",
+          "request": { "method": "GET", "url": "{{baseUrl}}/services/:id" }
+        }
+      ]
+    },
+    {
+      "name": "Workers",
+      "item": [
+        {
+          "name": "Get Nearby Workers",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/workers/nearby?lat=20.2961&lng=85.8245", "query": [
+              { "key": "lat", "value": "20.2961" },
+              { "key": "lng", "value": "85.8245" },
+              { "key": "serviceId", "value": "", "disabled": true }
+            ]}
+          }
+        },
+        {
+          "name": "Get Worker Profile",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/workers/profile",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Update Worker Profile",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/workers/profile",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"name\": \"Rajesh Kumar\", \"bio\": \"5 years experience in plumbing\", \"experience\": 5, \"serviceRadius\": 15}" }
+          }
+        },
+        {
+          "name": "Update Worker Location",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/workers/location",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"latitude\": 20.2961, \"longitude\": 85.8245}" }
+          }
+        },
+        {
+          "name": "Set Online Status",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/workers/status",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"isOnline\": true}" }
+          }
+        },
+        {
+          "name": "Update Skills",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/workers/skills",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"skills\": [\"Pipe Fitting\", \"Leak Repair\", \"Bathroom Fixtures\"]}" }
+          }
+        },
+        {
+          "name": "Set Working Hours",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/workers/working-hours",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"hours\": [{\"dayOfWeek\": 1, \"startTime\": \"08:00\", \"endTime\": \"18:00\", \"isOff\": false}, {\"dayOfWeek\": 0, \"startTime\": \"08:00\", \"endTime\": \"18:00\", \"isOff\": true}]}" }
+          }
+        },
+        {
+          "name": "Update Bank Details",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/workers/bank-details",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"accountName\": \"Rajesh Kumar\", \"accountNumber\": \"1234567890\", \"ifscCode\": \"HDFC0001234\", \"bankName\": \"HDFC Bank\", \"upiId\": \"rajesh@upi\"}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/users/profile",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/users/profile",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"name\": \"Priya Sharma\", \"email\": \"priya@example.com\"}" }
+          }
+        },
+        {
+          "name": "Add Address",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/users/addresses",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"label\": \"Home\", \"fullAddress\": \"123 MG Road, Bhubaneswar\", \"city\": \"Bhubaneswar\", \"state\": \"Odisha\", \"pincode\": \"751001\", \"latitude\": 20.2961, \"longitude\": 85.8245, \"isDefault\": true}" }
+          }
+        },
+        {
+          "name": "Get Addresses",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/users/addresses",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "Create Booking",
+          "event": [{ "listen": "test", "script": { "exec": [
+            "var json = pm.response.json();",
+            "if (json.data && json.data.id) { pm.collectionVariables.set('bookingId', json.data.id); }"
+          ]}}],
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/bookings",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"items\": [{\"serviceId\": \"svc-home-cleaning\", \"quantity\": 1}], \"scheduledDate\": \"2026-07-15\", \"scheduledTime\": \"10:00 AM\", \"description\": \"Please bring all equipment\", \"couponId\": null}" }
+          }
+        },
+        {
+          "name": "Get My Bookings (Customer)",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/bookings/my",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Worker Bookings",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/bookings/worker/my",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Get New Job Requests (Worker)",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/bookings/worker/pending-requests",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Today's Jobs (Worker)",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/bookings/worker/today",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Booking Details",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/bookings/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Accept Booking (Worker)",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/bookings/{{bookingId}}/accept",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Start Job (Worker)",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/bookings/{{bookingId}}/start",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Complete Job (Worker)",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/bookings/{{bookingId}}/complete",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Cancel Booking",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/bookings/{{bookingId}}/cancel",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"reason\": \"Change of plans\"}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Create Razorpay Order",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/payments/create-order/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Verify Payment",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/payments/verify",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"bookingId\": \"{{bookingId}}\", \"razorpayOrderId\": \"order_xxx\", \"razorpayPaymentId\": \"pay_xxx\", \"razorpaySignature\": \"sig_xxx\", \"method\": \"UPI\"}" }
+          }
+        },
+        {
+          "name": "Pay with Wallet",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/payments/wallet/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Pay Cash",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/payments/cash/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Payment Details",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/payments/{{bookingId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "item": [
+        {
+          "name": "Get Customer Wallet",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/wallet",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Customer Transactions",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/wallet/transactions",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Worker Wallet",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/wallet/worker",
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Get Worker Earnings (Today)",
+          "request": {
+            "method": "GET", "url": { "raw": "{{baseUrl}}/wallet/worker/earnings?period=today", "query": [{ "key": "period", "value": "today" }]},
+            "header": [{ "key": "Authorization", "value": "Bearer {{workerToken}}" }]
+          }
+        },
+        {
+          "name": "Withdraw Earnings",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/wallet/worker/withdraw",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{workerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"amount\": 500}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reviews",
+      "item": [
+        {
+          "name": "Submit Review",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/reviews",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"bookingId\": \"{{bookingId}}\", \"rating\": 5, \"comment\": \"Excellent service! Very professional and punctual.\"}" }
+          }
+        },
+        {
+          "name": "Get Worker Reviews",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/reviews/worker/{{workerId}}",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Coupons",
+      "item": [
+        {
+          "name": "Get Active Coupons",
+          "request": { "method": "GET", "url": "{{baseUrl}}/coupons/active" }
+        },
+        {
+          "name": "Validate Coupon",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/coupons/validate",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"code\": \"FIRST50\", \"orderAmount\": 999}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Get My Notifications",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/notifications",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        },
+        {
+          "name": "Mark All as Read",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/notifications/read-all",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Support",
+      "item": [
+        {
+          "name": "Get FAQ",
+          "request": { "method": "GET", "url": "{{baseUrl}}/support/faq" }
+        },
+        {
+          "name": "Create Ticket",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/support/tickets",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"subject\": \"Worker did not arrive\", \"description\": \"My booking was accepted but the worker never showed up.\"}" }
+          }
+        },
+        {
+          "name": "Get My Tickets",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/support/tickets",
+            "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Seed Admin User",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/admin/seed",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"email\": \"admin@homeservice.in\", \"password\": \"Admin@123\", \"name\": \"Super Admin\"}" }
+          }
+        },
+        {
+          "name": "Get All Customers",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/admin/customers",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Get Pending Workers",
+          "request": {
+            "method": "GET", "url": { "raw": "{{baseUrl}}/admin/workers?status=PENDING", "query": [{ "key": "status", "value": "PENDING" }]},
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Approve Worker",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/admin/workers/{{workerId}}/status",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"status\": \"APPROVED\"}" }
+          }
+        },
+        {
+          "name": "Get All Bookings",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/admin/bookings",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Get App Settings",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/admin/settings",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Update Commission Setting",
+          "request": {
+            "method": "PUT", "url": "{{baseUrl}}/admin/settings/commission_percent",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"value\": \"20\"}" }
+          }
+        },
+        {
+          "name": "Send Bulk Notification",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/notifications/admin/bulk",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\"title\": \"New Offer!\", \"body\": \"Get 30% off this weekend!\", \"type\": \"GENERAL\", \"targetRole\": \"CUSTOMER\"}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Dashboard Stats",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/reports/dashboard",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Revenue Report (Last 30 days)",
+          "request": {
+            "method": "GET", "url": { "raw": "{{baseUrl}}/reports/revenue?groupBy=day", "query": [{ "key": "groupBy", "value": "day" }]},
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Booking Report",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/reports/bookings",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        },
+        {
+          "name": "Worker Performance Report",
+          "request": {
+            "method": "GET", "url": "{{baseUrl}}/reports/workers",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }]
+          }
+        }
+      ]
+    }
+  ]
+}
