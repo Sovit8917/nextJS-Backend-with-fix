@@ -12,7 +12,7 @@ async function bootstrap() {
 
 
 const allowedOrigins =
-  process.env.FRONTEND_URLS?.split(',').map((url) => url.trim()) || [];
+  process.env.FRONTEND_URL?.split(',').map((url) => url.trim()) || [];
 
 app.enableCors({
   origin: (origin, callback) => {
