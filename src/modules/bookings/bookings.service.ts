@@ -109,6 +109,7 @@ export class BookingsService {
         worker: { select: { name: true, avatar: true, phone: true, rating: true } },
         address: true,
         payment: true,
+        review: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -208,23 +209,40 @@ export class BookingsService {
   }
 
   async rejectBooking(bookingId: string, workerId: string) {
-    const booking = await this.prisma.booking.findFirst({
-      where: { id: bookingId, workerId, status: BookingStatus.ACCEPTED },
-    });
-    if (!booking) throw new BadRequestException('Cannot reject this booking');
+    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
 
-    await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.REJECTED },
-    });
+    // Case 1: worker is declining a still-open, unassigned job request shown
+    // on the "New" tab. Record the decline so it stops showing up for this
+    // worker, without touching the booking itself (it stays open for other
+    // matching workers to accept).
+    if (booking.status === BookingStatus.PENDING && !booking.workerId) {
+      await this.prisma.bookingDecline.upsert({
+        where: { bookingId_workerId: { bookingId, workerId } },
+        create: { bookingId, workerId },
+        update: {},
+      });
+      return { message: 'Job declined' };
+    }
 
-    this.eventEmitter.emit(EVENTS.BOOKING_REJECTED, {
-      bookingId,
-      bookingNumber: booking.bookingNumber,
-      userId: booking.userId,
-    });
+    // Case 2: worker had already accepted this booking and is now backing
+    // out before starting the job.
+    if (booking.status === BookingStatus.ACCEPTED && booking.workerId === workerId) {
+      await this.prisma.booking.update({
+        where: { id: bookingId },
+        data: { status: BookingStatus.REJECTED, workerId: null },
+      });
 
-    return { message: 'Booking rejected' };
+      this.eventEmitter.emit(EVENTS.BOOKING_REJECTED, {
+        bookingId,
+        bookingNumber: booking.bookingNumber,
+        userId: booking.userId,
+      });
+
+      return { message: 'Booking rejected' };
+    }
+
+    throw new BadRequestException('Cannot reject this booking');
   }
 
   async startJob(bookingId: string, workerId: string) {
@@ -395,6 +413,7 @@ export class BookingsService {
         status: BookingStatus.PENDING,
         workerId: null,
         items: { some: { serviceId: { in: serviceIds } } },
+        declines: { none: { workerId } },
       },
       include: {
         items: { include: { service: { select: { name: true } } } },

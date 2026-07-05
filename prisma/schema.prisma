@@ -115,6 +115,7 @@ model Worker {
   tickets         SupportTicket[]
   workingHours    WorkingHour[]
   otps            Otp[]
+  declines        BookingDecline[]
 }
 
 model Otp {
@@ -261,6 +262,7 @@ model Booking {
   review         Review?
   chatMessages   ChatMessage[]
   tracking       WorkerTracking[]
+  declines       BookingDecline[]
 }
 
 model BookingItem {
@@ -494,4 +496,17 @@ model AppSetting {
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+
+model BookingDecline {
+  id        String   @id @default(uuid())
+  bookingId String
+  workerId  String
+  createdAt DateTime @default(now())
+
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  worker    Worker   @relation(fields: [workerId], references: [id])
+
+  @@unique([bookingId, workerId])
 }
