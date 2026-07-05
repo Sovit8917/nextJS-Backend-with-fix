@@ -144,10 +144,20 @@ export class BookingsService {
 
     if (!booking) throw new NotFoundException('Booking not found');
 
+    const isEligibleWorkerPreview =
+      requesterRole === 'WORKER' &&
+      booking.status === BookingStatus.PENDING &&
+      !booking.workerId &&
+      (await this.workerOffersAnyService(
+        requesterId,
+        booking.items.map((i) => i.serviceId),
+      ));
+
     if (
       requesterRole !== 'ADMIN' &&
       booking.userId !== requesterId &&
-      booking.workerId !== requesterId
+      booking.workerId !== requesterId &&
+      !isEligibleWorkerPreview
     ) {
       throw new ForbiddenException('Access denied');
     }
@@ -159,6 +169,19 @@ export class BookingsService {
       requesterRole === 'WORKER' ? this.redactCustomerContact(booking) : booking;
 
     return { data: withBookingAlias(sanitized) };
+  }
+
+  /**
+   * True if the worker has this service in their own offered-services list.
+   * Used to let a worker preview a still-open job request (to decide whether
+   * to accept/decline) without exposing arbitrary bookings to every worker.
+   */
+  private async workerOffersAnyService(workerId: string, serviceIds: string[]): Promise<boolean> {
+    if (serviceIds.length === 0) return false;
+    const match = await this.prisma.workerService.findFirst({
+      where: { workerId, serviceId: { in: serviceIds } },
+    });
+    return !!match;
   }
 
   /**
