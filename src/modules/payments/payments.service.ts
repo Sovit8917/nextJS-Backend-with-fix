@@ -76,11 +76,6 @@ export class PaymentsService {
       include: { booking: { select: { bookingNumber: true, userId: true } } },
     });
 
-    await this.prisma.booking.update({
-      where: { id: dto.bookingId },
-      data: { status: 'ACCEPTED' },
-    });
-
     this.eventEmitter.emit(EVENTS.PAYMENT_SUCCESS, {
       bookingId: dto.bookingId,
       bookingNumber: payment.booking.bookingNumber,
@@ -166,11 +161,6 @@ export class PaymentsService {
       create: { bookingId, amount: booking.finalAmount, method: 'CASH', status: 'PENDING' },
     });
 
-    await this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: 'ACCEPTED' },
-    });
-
     return { message: 'Cash payment recorded', data: payment };
   }
 
@@ -201,10 +191,6 @@ export class PaymentsService {
         where: { bookingId },
         update: { method: 'WALLET', status: 'SUCCESS' },
         create: { bookingId, amount: booking.finalAmount, method: 'WALLET', status: 'SUCCESS' },
-      }),
-      this.prisma.booking.update({
-        where: { id: bookingId },
-        data: { status: 'ACCEPTED' },
       }),
     ]);
 

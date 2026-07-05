@@ -249,17 +249,35 @@ export class BookingsService {
     }
 
     // Case 2: worker had already accepted this booking and is now backing
-    // out before starting the job.
+    // out before starting the job. Reopen it as PENDING (unassigned) so it
+    // goes back into the pool for other matching workers, instead of
+    // REJECTED which is a terminal status that never resurfaces in the
+    // "available jobs" query.
     if (booking.status === BookingStatus.ACCEPTED && booking.workerId === workerId) {
-      await this.prisma.booking.update({
+      const fullBooking = await this.prisma.booking.update({
         where: { id: bookingId },
-        data: { status: BookingStatus.REJECTED, workerId: null },
+        data: { status: BookingStatus.PENDING, workerId: null },
+        include: {
+          items: { include: { service: { select: { name: true } } } },
+          address: true,
+        },
+      });
+
+      // Don't immediately re-offer this job to the same worker who backed out
+      await this.prisma.bookingDecline.upsert({
+        where: { bookingId_workerId: { bookingId, workerId } },
+        create: { bookingId, workerId },
+        update: {},
       });
 
       this.eventEmitter.emit(EVENTS.BOOKING_REJECTED, {
         bookingId,
         bookingNumber: booking.bookingNumber,
         userId: booking.userId,
+        serviceIds: fullBooking.items.map((i: any) => i.serviceId),
+        serviceNames: fullBooking.items.map((i: any) => i.service.name),
+        addressCity: fullBooking.address?.city ?? '',
+        finalAmount: fullBooking.finalAmount,
       });
 
       return { message: 'Booking rejected' };
