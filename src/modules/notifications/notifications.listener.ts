@@ -13,19 +13,18 @@ export class NotificationsListener {
     private prisma: PrismaService,
   ) {}
 
-  @OnEvent(EVENTS.BOOKING_REJECTED)
-async handleBookingRejected(payload: any) {
-  await this.notificationsService.create({
-    userId: payload.userId,
-    title: 'Finding Another Worker',
-    body: `We are assigning another worker for booking #${payload.bookingNumber}.`,
-    type: EVENTS.BOOKING_REJECTED,
-    extraData: { bookingId: payload.bookingId },
-  });
+  @OnEvent(EVENTS.BOOKING_CREATED)
+  async handleBookingCreated(payload: any) {
+    await this.notificationsService.create({
+      userId: payload.userId,
+      title: 'Booking Confirmed! 🎉',
+      body: `Your booking #${payload.bookingNumber} for ${payload.serviceNames?.join(', ')} is placed. Finding a worker for you.`,
+      type: EVENTS.BOOKING_CREATED,
+      extraData: { bookingId: payload.bookingId },
+    });
 
-  // Job is back in the open pool — re-broadcast to other matching workers
-  await this.notifyMatchingWorkers(payload);
-}
+    await this.notifyMatchingWorkers(payload);
+  }
 
   private async notifyMatchingWorkers(payload: {
     bookingId: string;
@@ -141,6 +140,9 @@ async handleBookingRejected(payload: any) {
       type: EVENTS.BOOKING_REJECTED,
       extraData: { bookingId: payload.bookingId },
     });
+
+    // Job is back in the open pool — re-broadcast to other matching workers
+    await this.notifyMatchingWorkers(payload);
   }
 
   @OnEvent(EVENTS.PAYMENT_SUCCESS)
