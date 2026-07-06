@@ -41,17 +41,36 @@ export class BookingsService {
     let couponId = dto.couponId;
     if (couponId) {
       const coupon = await this.prisma.coupon.findFirst({
-        where: { id: couponId, isActive: true, expiresAt: { gte: new Date() } },
+        where: {
+          id: couponId,
+          isActive: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        },
       });
-      if (coupon && totalAmount >= coupon.minOrderValue) {
+
+      const usageOk = !coupon || !coupon.usageLimit || coupon.usedCount < coupon.usageLimit;
+
+      if (coupon && usageOk && totalAmount >= coupon.minOrderValue) {
         discountAmount =
           coupon.discountType === 'percentage'
             ? Math.min((totalAmount * coupon.discountValue) / 100, coupon.maxDiscount ?? Infinity)
             : coupon.discountValue;
-        await this.prisma.coupon.update({
-          where: { id: couponId },
+
+        // Atomically increment usage only while still within the limit, to
+        // avoid a race where two concurrent bookings both pass the check
+        // above and push usedCount past usageLimit.
+        const updateResult = await this.prisma.coupon.updateMany({
+          where: {
+            id: couponId,
+            ...(coupon.usageLimit ? { usedCount: { lt: coupon.usageLimit } } : {}),
+          },
           data: { usedCount: { increment: 1 } },
         });
+
+        if (updateResult.count === 0) {
+          discountAmount = 0;
+          couponId = undefined;
+        }
       } else {
         couponId = undefined;
       }

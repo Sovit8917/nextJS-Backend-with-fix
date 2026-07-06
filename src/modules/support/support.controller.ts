@@ -51,6 +51,11 @@ export class SupportController {
     return this.supportService.replyToTicket(id, user.id, user.role, message);
   }
 
+  @Put('tickets/:id/close')
+  closeMyTicket(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.supportService.closeMyTicket(id, user.id, user.role);
+  }
+
   // Admin only
   @Roles(Role.ADMIN)
   @Get('admin/tickets')

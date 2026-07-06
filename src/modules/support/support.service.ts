@@ -49,10 +49,61 @@ export class SupportService {
   }
 
   async replyToTicket(ticketId: string, senderId: string, senderType: string, message: string) {
+    if (!message?.trim()) {
+      throw new ForbiddenException('Message cannot be empty');
+    }
+
+    const ticket = await this.prisma.supportTicket.findUnique({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (
+      senderType !== 'ADMIN' &&
+      ticket.userId !== senderId &&
+      ticket.workerId !== senderId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (ticket.status === 'CLOSED') {
+      throw new ForbiddenException('This ticket is closed and can no longer accept replies');
+    }
+
     const msg = await this.prisma.ticketMessage.create({
-      data: { ticketId, senderId, senderType, message },
+      data: { ticketId, senderId, senderType, message: message.trim() },
     });
+
+    // A customer/worker reply on a resolved ticket reopens it for the admin
+    if (ticket.status === 'RESOLVED' && senderType !== 'ADMIN') {
+      await this.prisma.supportTicket.update({
+        where: { id: ticketId },
+        data: { status: 'OPEN', resolvedAt: null },
+      });
+    }
+
     return { message: 'Reply sent', data: msg };
+  }
+
+  async closeMyTicket(ticketId: string, requesterId: string, role: string) {
+    const ticket = await this.prisma.supportTicket.findUnique({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    if (
+      role !== 'ADMIN' &&
+      ticket.userId !== requesterId &&
+      ticket.workerId !== requesterId
+    ) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (ticket.status === 'CLOSED') {
+      throw new ForbiddenException('Ticket is already closed');
+    }
+
+    const updated = await this.prisma.supportTicket.update({
+      where: { id: ticketId },
+      data: { status: 'CLOSED' },
+    });
+    return { message: 'Ticket closed', data: updated };
   }
 
   async resolveTicket(ticketId: string) {
