@@ -49,4 +49,13 @@ export default () => ({
     otpExpiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10),
     otpBypass: process.env.OTP_BYPASS || '',
   },
+
+  retention: {
+    // How long to keep read/unread notifications before they're purged.
+    notificationDays: parseInt(process.env.NOTIFICATION_RETENTION_DAYS || '7', 10),
+    // How long to keep chat messages for bookings that have already
+    // finished (completed/cancelled/rejected). Active bookings are never
+    // touched regardless of message age.
+    chatDays: parseInt(process.env.CHAT_RETENTION_DAYS || '30', 10),
+  },
 });
