@@ -303,6 +303,10 @@ export class AdminService {
   }
 
   async deleteBanner(id: string) {
+    await this.prisma.banner.delete({ where: { id } });
+    return { message: 'Banner deleted' };
+  }
+
   // ─── Payment Management ────────────────────────────────────────
 
   async getAllPayments(status?: string, page = 1, limit = 20) {
