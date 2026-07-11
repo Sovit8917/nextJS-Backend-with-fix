@@ -304,6 +304,7 @@ export class AdminService {
 
   async deleteBanner(id: string) {
     await this.prisma.banner.delete({ where: { id } });
+    
     return { message: 'Banner deleted' };
   }
 
