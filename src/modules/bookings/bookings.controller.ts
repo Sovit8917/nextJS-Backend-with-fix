@@ -102,7 +102,8 @@ export class BookingsController {
     @Param('id') id: string,
     @CurrentUser('id') userId: string,
     @Body('reason') reason: string,
+    @Body('refundTo') refundTo?: 'ORIGINAL' | 'WALLET',
   ) {
-    return this.bookingsService.cancelBooking(id, userId, reason);
+    return this.bookingsService.cancelBooking(id, userId, reason, refundTo);
   }
 }

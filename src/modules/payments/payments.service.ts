@@ -205,7 +205,7 @@ export class PaymentsService {
     return { message: 'Payment successful from wallet' };
   }
 
-  async initiateRefund(bookingId: string, amount?: number) {
+  async initiateRefund(bookingId: string, amount?: number, refundTo: 'ORIGINAL' | 'WALLET' = 'ORIGINAL') {
     const payment = await this.prisma.payment.findUnique({
       where: { bookingId },
       include: { booking: { select: { bookingNumber: true, userId: true } } },
@@ -216,15 +216,11 @@ export class PaymentsService {
 
     const refundAmount = amount ?? payment.amount;
 
-    if (payment.razorpayPaymentId) {
-      const refund = await this.razorpay.payments.refund(payment.razorpayPaymentId, {
-        amount: Math.round(refundAmount * 100),
-      });
-      await this.prisma.payment.update({
-        where: { bookingId },
-        data: { status: 'REFUNDED', refundId: refund.id, refundAmount, refundedAt: new Date() },
-      });
-    } else if (payment.method === 'WALLET') {
+    // Customer explicitly chose wallet credit, OR the original payment was
+    // already a wallet payment (nowhere else to refund it to).
+    const creditToWallet = refundTo === 'WALLET' || payment.method === 'WALLET';
+
+    if (creditToWallet) {
       const wallet = await this.prisma.wallet.findUnique({ where: { userId: payment.booking.userId } });
       if (wallet) {
         await this.prisma.wallet.update({
@@ -245,6 +241,14 @@ export class PaymentsService {
         where: { bookingId },
         data: { status: 'REFUNDED', refundAmount, refundedAt: new Date() },
       });
+    } else if (payment.razorpayPaymentId) {
+      const refund = await this.razorpay.payments.refund(payment.razorpayPaymentId, {
+        amount: Math.round(refundAmount * 100),
+      });
+      await this.prisma.payment.update({
+        where: { bookingId },
+        data: { status: 'REFUNDED', refundId: refund.id, refundAmount, refundedAt: new Date() },
+      });
     }
 
     this.eventEmitter.emit(EVENTS.PAYMENT_REFUNDED, {
@@ -252,6 +256,7 @@ export class PaymentsService {
       bookingNumber: payment.booking.bookingNumber,
       userId: payment.booking.userId,
       refundAmount,
+      refundedTo: creditToWallet ? 'WALLET' : 'ORIGINAL',
     });
 
     return { message: 'Refund initiated successfully' };

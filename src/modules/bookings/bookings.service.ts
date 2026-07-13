@@ -10,12 +10,14 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus } from '../../common/enums';
 import { EVENTS } from '../../common/events/events.constants';
 import { withBookingAlias, withBookingAliasList } from '../../common/utils/serialize.util';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class BookingsService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
+    private paymentsService: PaymentsService,
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
@@ -381,8 +383,7 @@ export class BookingsService {
 
     return { message: 'Job completed successfully' };
   }
-
-  async cancelBooking(bookingId: string, requesterId: string, reason: string) {
+async cancelBooking(bookingId: string, requesterId: string, reason: string, refundTo: 'ORIGINAL' | 'WALLET' = 'ORIGINAL') {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -400,6 +401,15 @@ export class BookingsService {
       data: { status: BookingStatus.CANCELLED, cancelReason: reason },
     });
 
+// Refund automatically if a successful payment exists for this booking
+    const payment = await this.prisma.payment.findUnique({ where: { bookingId } });
+    if (payment && payment.status === 'SUCCESS') {
+      try {
+        await this.paymentsService.initiateRefund(bookingId, undefined, refundTo);
+      } catch (err) {
+        console.error(`Refund failed for booking ${bookingId}:`, err);
+      }
+    }
     this.eventEmitter.emit(EVENTS.BOOKING_CANCELLED, {
       bookingId,
       bookingNumber: booking.bookingNumber,
