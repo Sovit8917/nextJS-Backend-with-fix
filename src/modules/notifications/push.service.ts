@@ -35,9 +35,9 @@ export class PushService implements OnModuleInit {
   }
 
   /**
-   * Sends a push notification to a single device token. Never throws —
-   * push delivery failures must not break the calling business logic
-   * (e.g. booking creation), they're just logged.
+   * Sends a push notification to a single device token.
+   * Uses DATA-ONLY messages so Notifee is responsible for displaying
+   * the notification and duplicate notifications are avoided.
    */
   async sendToToken(
     token: string | null | undefined,
@@ -53,27 +53,31 @@ export class PushService implements OnModuleInit {
     try {
       await admin.messaging().send({
         token,
-        notification: {
+
+        // Data-only payload
+        data: {
           title: payload.title,
           body: payload.body,
-          ...(payload.imageUrl && { imageUrl: payload.imageUrl }),
+          ...(payload.imageUrl && {
+            imageUrl: String(payload.imageUrl),
+          }),
+          ...(payload.data ?? {}),
         },
-        data: payload.data ?? {},
+
         android: {
           priority: 'high',
-          ...(payload.imageUrl && {
-            notification: { imageUrl: payload.imageUrl },
-          }),
         },
+
         apns: {
-          payload: { aps: { sound: 'default' } },
-          ...(payload.imageUrl && {
-            fcmOptions: { imageUrl: payload.imageUrl },
-          }),
+          payload: {
+            aps: {
+              'content-available': 1,
+            },
+          },
         },
       });
     } catch (err: any) {
-      // Common benign case: token expired/uninstalled — just log, don't throw.
+      // Token expired, app uninstalled, etc.
       this.logger.warn(`Push send failed: ${err?.message ?? err}`);
     }
   }
