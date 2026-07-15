@@ -1,6 +1,19 @@
-import { Controller, Get, Post, Body, Param, Headers, UseGuards, RawBodyRequest, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Headers,
+  UseGuards,
+  RawBodyRequest,
+  Req,
+  BadRequestException,
+} from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
+import { CreateBookingDto } from '../bookings/dto/create-booking.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, Roles, Public } from '../../common/decorators';
@@ -22,15 +35,32 @@ export class PaymentsController {
   async razorpayWebhook(
     @Body() payload: any,
     @Headers('x-razorpay-signature') signature: string,
+    @Req() req: RawBodyRequest<Request>,
   ) {
     const webhookSecret = this.config.get<string>('RAZORPAY_WEBHOOK_SECRET', '');
-    return this.paymentsService.handleRazorpayWebhook(payload, signature, webhookSecret);
+    // Razorpay signs the raw request bytes, not the parsed/re-serialized
+    // JSON object — re-stringifying `payload` can produce a different byte
+    // string (key order, spacing) and make valid signatures fail to verify.
+    if (!req.rawBody) {
+      throw new BadRequestException('Raw body unavailable for signature verification');
+    }
+    return this.paymentsService.handleRazorpayWebhook(req.rawBody, payload, signature, webhookSecret);
+  }
+
+  @ApiBearerAuth()
+  @Roles(Role.CUSTOMER)
+  @Post('create-order')
+  @ApiOperation({
+    summary: 'Create a Razorpay order for a NEW booking (booking is created only after payment succeeds)',
+  })
+  createOrderForNewBooking(@Body() dto: CreateBookingDto, @CurrentUser('id') userId: string) {
+    return this.paymentsService.createOrderForNewBooking(userId, dto);
   }
 
   @ApiBearerAuth()
   @Roles(Role.CUSTOMER)
   @Post('create-order/:bookingId')
-  @ApiOperation({ summary: 'Create Razorpay order for a booking' })
+  @ApiOperation({ summary: '[Legacy] Create Razorpay order for an existing booking' })
   createOrder(@Param('bookingId') bookingId: string, @CurrentUser('id') userId: string) {
     return this.paymentsService.createOrder(bookingId, userId);
   }

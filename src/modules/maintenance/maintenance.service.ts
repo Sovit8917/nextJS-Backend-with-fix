@@ -25,12 +25,38 @@ export class MaintenanceService {
     return this.config.get<number>('retention.chatDays') ?? 30;
   }
 
+  private get pendingBookingRetentionDays(): number {
+    return this.config.get<number>('retention.pendingBookingDays') ?? 10;
+  }
+
   // Runs every day at 3 AM server time. Low-traffic hour, keeps deletes
   // small and incremental instead of a giant backlog building up.
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async runDailyCleanup() {
     await this.cleanupOldNotifications();
     await this.cleanupOldChatMessages();
+    await this.cleanupAbandonedPendingBookings();
+  }
+
+  async cleanupAbandonedPendingBookings() {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - this.pendingBookingRetentionDays);
+
+    // A PendingBooking this old was created for a Razorpay order whose
+    // checkout was abandoned or failed and never came back — Razorpay
+    // orders themselves expire long before this, so there's no risk of
+    // deleting a draft that could still be paid for and finalized.
+    const result = await this.prisma.pendingBooking.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+
+    if (result.count > 0) {
+      this.logger.log(
+        `Deleted ${result.count} abandoned pending booking(s) older than ` +
+          `${this.pendingBookingRetentionDays} day(s)`,
+      );
+    }
+    return result.count;
   }
 
   async cleanupOldNotifications() {

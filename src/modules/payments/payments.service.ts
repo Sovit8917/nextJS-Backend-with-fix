@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EVENTS } from '../../common/events/events.constants';
+import { BookingsService } from '../bookings/bookings.service';
+import { CreateBookingDto } from '../bookings/dto/create-booking.dto';
 import * as crypto from 'crypto';
 import Razorpay from 'razorpay';
 
@@ -14,11 +16,100 @@ export class PaymentsService {
     private prisma: PrismaService,
     private config: ConfigService,
     private eventEmitter: EventEmitter2,
+    private bookingsService: BookingsService,
   ) {
     this.razorpay = new Razorpay({
       key_id: config.get<string>('RAZORPAY_KEY_ID', ''),
       key_secret: config.get<string>('RAZORPAY_KEY_SECRET', ''),
     });
+  }
+
+  /**
+   * Online-payment entry point: prices the booking and opens a Razorpay
+   * order WITHOUT creating a Booking row yet. The booking only comes into
+   * existence once payment is confirmed (see finalizeFromDraft), so an
+   * abandoned/failed checkout never leaves a phantom booking behind.
+   * Cash-on-delivery bypasses this entirely and calls bookings.create()
+   * directly, since there's nothing to wait on.
+   */
+  async createOrderForNewBooking(userId: string, dto: CreateBookingDto) {
+    const computed = await this.bookingsService.computeOrderAmounts(dto);
+
+    const order = await this.razorpay.orders.create({
+      amount: Math.round(computed.finalAmount * 100),
+      currency: 'INR',
+      receipt: `HS-draft-${Date.now()}`,
+    });
+
+    await this.prisma.pendingBooking.create({
+      data: {
+        userId,
+        razorpayOrderId: order.id,
+        addressId: dto.addressId,
+        scheduledDate: new Date(dto.scheduledDate),
+        scheduledTime: dto.scheduledTime,
+        description: dto.description,
+        images: dto.images ?? [],
+        items: computed.items,
+        couponId: computed.couponId,
+        totalAmount: computed.totalAmount,
+        discountAmount: computed.discountAmount,
+        taxAmount: computed.taxAmount,
+        finalAmount: computed.finalAmount,
+      },
+    });
+
+    return {
+      data: {
+        orderId: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        keyId: this.config.get('RAZORPAY_KEY_ID'),
+      },
+    };
+  }
+
+  /**
+   * Turns a paid Razorpay order into a real booking. Called from both the
+   * client's verifyPayment() call and the payment.captured webhook — safe
+   * to call from both, since only whichever call arrives first actually
+   * claims the draft (via the deleteMany race below) and creates the
+   * booking; the other becomes a no-op that returns the same result.
+   */
+  private async finalizeFromDraft(
+    razorpayOrderId: string,
+    paymentInfo: { razorpayPaymentId: string; razorpaySignature?: string; method?: string },
+    opts: { throwIfMissing?: boolean } = {},
+  ) {
+    const existingPayment = await this.prisma.payment.findFirst({
+      where: { razorpayOrderId },
+      include: { booking: { include: { items: { include: { service: true } }, address: true } } },
+    });
+    if (existingPayment?.status === 'SUCCESS') {
+      return existingPayment.booking;
+    }
+
+    const draft = await this.prisma.pendingBooking.findUnique({ where: { razorpayOrderId } });
+    if (!draft) {
+      if (opts.throwIfMissing) {
+        throw new NotFoundException('No pending booking found for this payment order');
+      }
+      return null;
+    }
+
+    // Whichever caller (client verify vs. webhook) actually deletes the
+    // draft "wins" and creates the booking; the loser sees count === 0
+    // and just reads back the booking the winner already created.
+    const claimed = await this.prisma.pendingBooking.deleteMany({ where: { id: draft.id } });
+    if (claimed.count === 0) {
+      const payment = await this.prisma.payment.findFirst({
+        where: { razorpayOrderId },
+        include: { booking: { include: { items: { include: { service: true } }, address: true } } },
+      });
+      return payment?.booking ?? null;
+    }
+
+    return this.bookingsService.createFromPaidDraft(draft, paymentInfo);
   }
 
   async createOrder(bookingId: string, userId: string) {
@@ -48,8 +139,13 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Verifies a payment for the new pre-booking flow (no bookingId exists
+   * yet — the booking is created here, from the draft, on success).
+   * `bookingId` is intentionally NOT part of this dto: it doesn't exist
+   * until this call succeeds.
+   */
   async verifyPayment(dto: {
-    bookingId: string;
     razorpayOrderId: string;
     razorpayPaymentId: string;
     razorpaySignature: string;
@@ -61,39 +157,53 @@ export class PaymentsService {
       .update(body)
       .digest('hex');
 
-    if (expectedSignature !== dto.razorpaySignature) {
+    const expected = Buffer.from(expectedSignature, 'utf8');
+    const received = Buffer.from(dto.razorpaySignature ?? '', 'utf8');
+    const isValid =
+      expected.length === received.length && crypto.timingSafeEqual(expected, received);
+
+    if (!isValid) {
       throw new BadRequestException('Invalid payment signature');
     }
 
-    const payment = await this.prisma.payment.update({
-      where: { bookingId: dto.bookingId },
-      data: {
-        status: 'SUCCESS',
+    const booking = await this.finalizeFromDraft(
+      dto.razorpayOrderId,
+      {
         razorpayPaymentId: dto.razorpayPaymentId,
         razorpaySignature: dto.razorpaySignature,
-        method: dto.method as any,
+        method: dto.method,
       },
-      include: { booking: { select: { bookingNumber: true, userId: true } } },
-    });
+      { throwIfMissing: true },
+    );
 
-    this.eventEmitter.emit(EVENTS.PAYMENT_SUCCESS, {
-      bookingId: dto.bookingId,
-      bookingNumber: payment.booking.bookingNumber,
-      userId: payment.booking.userId,
-      amount: payment.amount,
-      method: dto.method,
-    });
-
-    return { message: 'Payment verified successfully', data: payment };
+    return { message: 'Payment verified, booking confirmed', data: booking };
   }
 
-  async handleRazorpayWebhook(payload: any, signature: string, webhookSecret: string) {
+  async handleRazorpayWebhook(
+    rawBody: Buffer,
+    payload: any,
+    signature: string,
+    webhookSecret: string,
+  ) {
+    if (!signature || !webhookSecret) {
+      throw new BadRequestException('Invalid webhook signature');
+    }
+
     const expectedSignature = crypto
       .createHmac('sha256', webhookSecret)
-      .update(JSON.stringify(payload))
+      .update(rawBody)
       .digest('hex');
 
-    if (expectedSignature !== signature) {
+    const expected = Buffer.from(expectedSignature, 'utf8');
+    const received = Buffer.from(signature, 'utf8');
+
+    // timingSafeEqual throws if buffer lengths differ, and a length
+    // mismatch itself means "not a match" — so treat that as invalid
+    // rather than letting the exception bubble up as a 500.
+    const isValid =
+      expected.length === received.length && crypto.timingSafeEqual(expected, received);
+
+    if (!isValid) {
       throw new BadRequestException('Invalid webhook signature');
     }
 
@@ -101,25 +211,17 @@ export class PaymentsService {
     const paymentEntity = payload.payload?.payment?.entity;
 
     if (event === 'payment.captured' && paymentEntity) {
-      const payment = await this.prisma.payment.findFirst({
-        where: { razorpayOrderId: paymentEntity.order_id },
-        include: { booking: { select: { bookingNumber: true, userId: true } } },
-      });
-
-      if (payment && payment.status !== 'SUCCESS') {
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: { status: 'SUCCESS', razorpayPaymentId: paymentEntity.id },
-        });
-
-        this.eventEmitter.emit(EVENTS.PAYMENT_SUCCESS, {
-          bookingId: payment.bookingId,
-          bookingNumber: payment.booking.bookingNumber,
-          userId: payment.booking.userId,
-          amount: payment.amount,
-          method: paymentEntity.method,
-        });
-      }
+      // New flow: the booking doesn't exist yet — it's created here (or
+      // by the client's verify() call, whichever arrives first) from the
+      // PendingBooking draft tied to this order. throwIfMissing is false
+      // because a captured event for an order this webhook doesn't
+      // recognize (e.g. unrelated to bookings) should be a quiet no-op,
+      // not a 400 that makes Razorpay keep retrying forever.
+      await this.finalizeFromDraft(
+        paymentEntity.order_id,
+        { razorpayPaymentId: paymentEntity.id, method: paymentEntity.method },
+        { throwIfMissing: false },
+      );
     }
 
     if (event === 'refund.processed' && paymentEntity) {
@@ -205,7 +307,7 @@ export class PaymentsService {
     return { message: 'Payment successful from wallet' };
   }
 
-  async initiateRefund(bookingId: string, amount?: number, refundTo: 'ORIGINAL' | 'WALLET' = 'ORIGINAL') {
+  async initiateRefund(bookingId: string, amount?: number) {
     const payment = await this.prisma.payment.findUnique({
       where: { bookingId },
       include: { booking: { select: { bookingNumber: true, userId: true } } },
@@ -216,11 +318,15 @@ export class PaymentsService {
 
     const refundAmount = amount ?? payment.amount;
 
-    // Customer explicitly chose wallet credit, OR the original payment was
-    // already a wallet payment (nowhere else to refund it to).
-    const creditToWallet = refundTo === 'WALLET' || payment.method === 'WALLET';
-
-    if (creditToWallet) {
+    if (payment.razorpayPaymentId) {
+      const refund = await this.razorpay.payments.refund(payment.razorpayPaymentId, {
+        amount: Math.round(refundAmount * 100),
+      });
+      await this.prisma.payment.update({
+        where: { bookingId },
+        data: { status: 'REFUNDED', refundId: refund.id, refundAmount, refundedAt: new Date() },
+      });
+    } else if (payment.method === 'WALLET') {
       const wallet = await this.prisma.wallet.findUnique({ where: { userId: payment.booking.userId } });
       if (wallet) {
         await this.prisma.wallet.update({
@@ -241,14 +347,6 @@ export class PaymentsService {
         where: { bookingId },
         data: { status: 'REFUNDED', refundAmount, refundedAt: new Date() },
       });
-    } else if (payment.razorpayPaymentId) {
-      const refund = await this.razorpay.payments.refund(payment.razorpayPaymentId, {
-        amount: Math.round(refundAmount * 100),
-      });
-      await this.prisma.payment.update({
-        where: { bookingId },
-        data: { status: 'REFUNDED', refundId: refund.id, refundAmount, refundedAt: new Date() },
-      });
     }
 
     this.eventEmitter.emit(EVENTS.PAYMENT_REFUNDED, {
@@ -256,7 +354,6 @@ export class PaymentsService {
       bookingNumber: payment.booking.bookingNumber,
       userId: payment.booking.userId,
       refundAmount,
-      refundedTo: creditToWallet ? 'WALLET' : 'ORIGINAL',
     });
 
     return { message: 'Refund initiated successfully' };

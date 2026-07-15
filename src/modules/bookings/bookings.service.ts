@@ -10,18 +10,21 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus } from '../../common/enums';
 import { EVENTS } from '../../common/events/events.constants';
 import { withBookingAlias, withBookingAliasList } from '../../common/utils/serialize.util';
-import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class BookingsService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
-    private paymentsService: PaymentsService,
   ) {}
 
-  async create(userId: string, dto: CreateBookingDto) {
-    // Validate services and calculate total
+  /**
+   * Validates the requested services and coupon, and computes pricing.
+   * Does NOT write anything to the database and does NOT reserve coupon
+   * usage — safe to call speculatively (e.g. to price a Razorpay order
+   * before any booking exists).
+   */
+  async computeOrderAmounts(dto: CreateBookingDto) {
     const services = await this.prisma.service.findMany({
       where: { id: { in: dto.items.map((i) => i.serviceId) }, isActive: true },
     });
@@ -38,9 +41,8 @@ export class BookingsService {
       return { serviceId: item.serviceId, quantity: item.quantity, price };
     });
 
-    // Apply coupon
     let discountAmount = 0;
-    let couponId = dto.couponId;
+    let couponId: string | undefined = dto.couponId;
     if (couponId) {
       const coupon = await this.prisma.coupon.findFirst({
         where: {
@@ -57,22 +59,6 @@ export class BookingsService {
           coupon.discountType === 'percentage'
             ? Math.min((totalAmount * coupon.discountValue) / 100, coupon.maxDiscount ?? Infinity)
             : coupon.discountValue;
-
-        // Atomically increment usage only while still within the limit, to
-        // avoid a race where two concurrent bookings both pass the check
-        // above and push usedCount past usageLimit.
-        const updateResult = await this.prisma.coupon.updateMany({
-          where: {
-            id: couponId,
-            ...(coupon.usageLimit ? { usedCount: { lt: coupon.usageLimit } } : {}),
-          },
-          data: { usedCount: { increment: 1 } },
-        });
-
-        if (updateResult.count === 0) {
-          discountAmount = 0;
-          couponId = undefined;
-        }
       } else {
         couponId = undefined;
       }
@@ -85,6 +71,47 @@ export class BookingsService {
     const taxAmount = ((totalAmount - discountAmount) * taxPercent) / 100;
     const finalAmount = totalAmount - discountAmount + taxAmount;
 
+    return { items, totalAmount, discountAmount, taxAmount, finalAmount, couponId };
+  }
+
+  /**
+   * Atomically reserves one use of a coupon (increments usedCount only
+   * while still under the limit), avoiding a race where two concurrent
+   * bookings both pass the eligibility check and push usedCount past
+   * usageLimit. Returns whether the reservation succeeded.
+   */
+  private async reserveCoupon(couponId: string | undefined): Promise<boolean> {
+    if (!couponId) return false;
+    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    if (!coupon) return false;
+
+    const updateResult = await this.prisma.coupon.updateMany({
+      where: {
+        id: couponId,
+        ...(coupon.usageLimit ? { usedCount: { lt: coupon.usageLimit } } : {}),
+      },
+      data: { usedCount: { increment: 1 } },
+    });
+
+    return updateResult.count > 0;
+  }
+
+  async create(userId: string, dto: CreateBookingDto) {
+    const computed = await this.computeOrderAmounts(dto);
+
+    let { discountAmount, couponId, taxAmount, finalAmount } = computed;
+    if (couponId && !(await this.reserveCoupon(couponId))) {
+      // Lost the race for the last coupon use — recompute without it.
+      discountAmount = 0;
+      couponId = undefined;
+      const commissionSetting = await this.prisma.appSetting.findUnique({
+        where: { key: 'tax_percent' },
+      });
+      const taxPercent = parseFloat(commissionSetting?.value ?? '18');
+      taxAmount = (computed.totalAmount * taxPercent) / 100;
+      finalAmount = computed.totalAmount + taxAmount;
+    }
+
     const booking = await this.prisma.booking.create({
       data: {
         bookingNumber: `HS${Date.now()}`,
@@ -94,12 +121,12 @@ export class BookingsService {
         scheduledTime: dto.scheduledTime,
         description: dto.description,
         images: dto.images ?? [],
-        totalAmount,
+        totalAmount: computed.totalAmount,
         discountAmount,
         taxAmount,
         finalAmount,
         couponId,
-        items: { create: items },
+        items: { create: computed.items },
       },
       include: {
         items: { include: { service: { select: { name: true } } } },
@@ -120,6 +147,86 @@ export class BookingsService {
     });
 
     return { message: 'Booking created successfully', data: withBookingAlias(booking) };
+  }
+
+  /**
+   * Creates the real Booking (+ its Payment row, already SUCCESS) from a
+   * PendingBooking draft, once Razorpay has confirmed the payment. This is
+   * the only place a Booking is created for the online-payment flow — no
+   * Booking row exists before this point, so a customer who never
+   * completes payment never gets a phantom booking.
+   */
+  async createFromPaidDraft(
+    draft: {
+      id: string;
+      userId: string;
+      addressId: string | null;
+      scheduledDate: Date;
+      scheduledTime: string;
+      description: string | null;
+      images: string[];
+      items: unknown;
+      couponId: string | null;
+      totalAmount: number;
+      discountAmount: number;
+      taxAmount: number;
+      finalAmount: number;
+      razorpayOrderId: string;
+    },
+    paymentInfo: { razorpayPaymentId: string; razorpaySignature?: string; method?: string },
+  ) {
+    const items = draft.items as { serviceId: string; quantity: number; price: number }[];
+    const method = (['UPI', 'CARD', 'WALLET', 'CASH'].includes(
+      (paymentInfo.method ?? '').toUpperCase(),
+    )
+      ? (paymentInfo.method ?? '').toUpperCase()
+      : 'UPI') as 'UPI' | 'CARD' | 'WALLET' | 'CASH';
+
+    const booking = await this.prisma.booking.create({
+      data: {
+        bookingNumber: `HS${Date.now()}`,
+        userId: draft.userId,
+        addressId: draft.addressId ?? undefined,
+        scheduledDate: draft.scheduledDate,
+        scheduledTime: draft.scheduledTime,
+        description: draft.description ?? undefined,
+        images: draft.images ?? [],
+        totalAmount: draft.totalAmount,
+        discountAmount: draft.discountAmount,
+        taxAmount: draft.taxAmount,
+        finalAmount: draft.finalAmount,
+        couponId: draft.couponId ?? undefined,
+        items: { create: items },
+        payment: {
+          create: {
+            amount: draft.finalAmount,
+            method,
+            status: 'SUCCESS',
+            razorpayOrderId: draft.razorpayOrderId,
+            razorpayPaymentId: paymentInfo.razorpayPaymentId,
+            razorpaySignature: paymentInfo.razorpaySignature,
+          },
+        },
+      },
+      include: {
+        items: { include: { service: { select: { name: true } } } },
+        address: true,
+      },
+    });
+
+    this.eventEmitter.emit(EVENTS.BOOKING_CREATED, {
+      bookingId: booking.id,
+      bookingNumber: booking.bookingNumber,
+      userId: draft.userId,
+      serviceIds: booking.items.map((i: any) => i.serviceId),
+      serviceNames: booking.items.map((i: any) => i.service.name),
+      scheduledDate: booking.scheduledDate,
+      scheduledTime: booking.scheduledTime,
+      finalAmount: booking.finalAmount,
+      addressCity: booking.address?.city ?? '',
+    });
+
+    return withBookingAlias(booking);
   }
 
   async findUserBookings(userId: string, status?: BookingStatus) {
@@ -383,7 +490,8 @@ export class BookingsService {
 
     return { message: 'Job completed successfully' };
   }
-async cancelBooking(bookingId: string, requesterId: string, reason: string, refundTo: 'ORIGINAL' | 'WALLET' = 'ORIGINAL') {
+
+  async cancelBooking(bookingId: string, requesterId: string, reason: string) {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
     if (!booking) throw new NotFoundException('Booking not found');
 
@@ -401,15 +509,6 @@ async cancelBooking(bookingId: string, requesterId: string, reason: string, refu
       data: { status: BookingStatus.CANCELLED, cancelReason: reason },
     });
 
-// Refund automatically if a successful payment exists for this booking
-    const payment = await this.prisma.payment.findUnique({ where: { bookingId } });
-    if (payment && payment.status === 'SUCCESS') {
-      try {
-        await this.paymentsService.initiateRefund(bookingId, undefined, refundTo);
-      } catch (err) {
-        console.error(`Refund failed for booking ${bookingId}:`, err);
-      }
-    }
     this.eventEmitter.emit(EVENTS.BOOKING_CANCELLED, {
       bookingId,
       bookingNumber: booking.bookingNumber,
