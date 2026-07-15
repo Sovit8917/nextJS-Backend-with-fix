@@ -65,7 +65,7 @@ export class BookingsService {
     }
 
     const commissionSetting = await this.prisma.appSetting.findUnique({
-      where: { key: 'tax_percent' },
+      where: { key: 'gst_rate' },
     });
     const taxPercent = parseFloat(commissionSetting?.value ?? '18');
     const taxAmount = ((totalAmount - discountAmount) * taxPercent) / 100;
@@ -105,7 +105,7 @@ export class BookingsService {
       discountAmount = 0;
       couponId = undefined;
       const commissionSetting = await this.prisma.appSetting.findUnique({
-        where: { key: 'tax_percent' },
+       where: { key: 'gst_rate' },
       });
       const taxPercent = parseFloat(commissionSetting?.value ?? '18');
       taxAmount = (computed.totalAmount * taxPercent) / 100;
@@ -447,7 +447,7 @@ export class BookingsService {
 
     // Calculate and credit worker earnings
     const commissionSetting = await this.prisma.appSetting.findUnique({
-      where: { key: 'commission_percent' },
+      where: { key: 'commission_rate' },
     });
     const commissionPercent = parseFloat(commissionSetting?.value ?? '20');
     const commission = (booking.finalAmount * commissionPercent) / 100;
