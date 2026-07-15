@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -57,11 +61,16 @@ export class CouponsService {
 
     if (coupon.maxDiscount) discount = Math.min(discount, coupon.maxDiscount);
 
+    discount = Math.round((discount + Number.EPSILON) * 100) / 100;
+
+    const finalAmount =
+      Math.round((orderAmount - discount + Number.EPSILON) * 100) / 100;
+
     return {
       data: {
         coupon,
         discount,
-        finalAmount: orderAmount - discount,
+        finalAmount,
       },
     };
   }
@@ -91,7 +100,10 @@ export class CouponsService {
   }
 
   async remove(id: string) {
-    await this.prisma.coupon.update({ where: { id }, data: { isActive: false } });
+    await this.prisma.coupon.update({
+      where: { id },
+      data: { isActive: false },
+    });
     return { message: 'Coupon deleted' };
   }
 }

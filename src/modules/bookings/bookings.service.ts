@@ -9,7 +9,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus } from '../../common/enums';
 import { EVENTS } from '../../common/events/events.constants';
-import { withBookingAlias, withBookingAliasList } from '../../common/utils/serialize.util';
+import {
+  withBookingAlias,
+  withBookingAliasList,
+} from '../../common/utils/serialize.util';
+
+function roundMoney(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
 
 @Injectable()
 export class BookingsService {
@@ -52,13 +59,18 @@ export class BookingsService {
         },
       });
 
-      const usageOk = !coupon || !coupon.usageLimit || coupon.usedCount < coupon.usageLimit;
+      const usageOk =
+        !coupon || !coupon.usageLimit || coupon.usedCount < coupon.usageLimit;
 
       if (coupon && usageOk && totalAmount >= coupon.minOrderValue) {
-        discountAmount =
+        discountAmount = roundMoney(
           coupon.discountType === 'percentage'
-            ? Math.min((totalAmount * coupon.discountValue) / 100, coupon.maxDiscount ?? Infinity)
-            : coupon.discountValue;
+            ? Math.min(
+                (totalAmount * coupon.discountValue) / 100,
+                coupon.maxDiscount ?? Infinity,
+              )
+            : coupon.discountValue,
+        );
       } else {
         couponId = undefined;
       }
@@ -68,10 +80,21 @@ export class BookingsService {
       where: { key: 'gst_rate' },
     });
     const taxPercent = parseFloat(commissionSetting?.value ?? '18');
-    const taxAmount = ((totalAmount - discountAmount) * taxPercent) / 100;
-    const finalAmount = totalAmount - discountAmount + taxAmount;
+    const taxAmount = roundMoney(
+      ((totalAmount - discountAmount) * taxPercent) / 100,
+    );
+    const finalAmount = roundMoney(
+  totalAmount - discountAmount + taxAmount
+);
 
-    return { items, totalAmount, discountAmount, taxAmount, finalAmount, couponId };
+    return {
+      items,
+      totalAmount,
+      discountAmount,
+      taxAmount,
+      finalAmount,
+      couponId,
+    };
   }
 
   /**
@@ -82,7 +105,9 @@ export class BookingsService {
    */
   private async reserveCoupon(couponId: string | undefined): Promise<boolean> {
     if (!couponId) return false;
-    const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id: couponId },
+    });
     if (!coupon) return false;
 
     const updateResult = await this.prisma.coupon.updateMany({
@@ -105,7 +130,7 @@ export class BookingsService {
       discountAmount = 0;
       couponId = undefined;
       const commissionSetting = await this.prisma.appSetting.findUnique({
-       where: { key: 'gst_rate' },
+        where: { key: 'gst_rate' },
       });
       const taxPercent = parseFloat(commissionSetting?.value ?? '18');
       taxAmount = (computed.totalAmount * taxPercent) / 100;
@@ -146,7 +171,10 @@ export class BookingsService {
       addressCity: booking.address?.city ?? '',
     });
 
-    return { message: 'Booking created successfully', data: withBookingAlias(booking) };
+    return {
+      message: 'Booking created successfully',
+      data: withBookingAlias(booking),
+    };
   }
 
   /**
@@ -173,14 +201,24 @@ export class BookingsService {
       finalAmount: number;
       razorpayOrderId: string;
     },
-    paymentInfo: { razorpayPaymentId: string; razorpaySignature?: string; method?: string },
+    paymentInfo: {
+      razorpayPaymentId: string;
+      razorpaySignature?: string;
+      method?: string;
+    },
   ) {
-    const items = draft.items as { serviceId: string; quantity: number; price: number }[];
-    const method = (['UPI', 'CARD', 'WALLET', 'CASH'].includes(
-      (paymentInfo.method ?? '').toUpperCase(),
-    )
-      ? (paymentInfo.method ?? '').toUpperCase()
-      : 'UPI') as 'UPI' | 'CARD' | 'WALLET' | 'CASH';
+    const items = draft.items as {
+      serviceId: string;
+      quantity: number;
+      price: number;
+    }[];
+    const method = (
+      ['UPI', 'CARD', 'WALLET', 'CASH'].includes(
+        (paymentInfo.method ?? '').toUpperCase(),
+      )
+        ? (paymentInfo.method ?? '').toUpperCase()
+        : 'UPI'
+    ) as 'UPI' | 'CARD' | 'WALLET' | 'CASH';
 
     const booking = await this.prisma.booking.create({
       data: {
@@ -233,8 +271,12 @@ export class BookingsService {
     const bookings = await this.prisma.booking.findMany({
       where: { userId, ...(status && { status }) },
       include: {
-        items: { include: { service: { select: { name: true, image: true } } } },
-        worker: { select: { name: true, avatar: true, phone: true, rating: true } },
+        items: {
+          include: { service: { select: { name: true, image: true } } },
+        },
+        worker: {
+          select: { name: true, avatar: true, phone: true, rating: true },
+        },
         address: true,
         payment: true,
         review: true,
@@ -262,7 +304,15 @@ export class BookingsService {
       where: { id },
       include: {
         items: { include: { service: true } },
-        worker: { select: { id: true, name: true, avatar: true, phone: true, rating: true } },
+        worker: {
+          select: {
+            id: true,
+            name: true,
+            avatar: true,
+            phone: true,
+            rating: true,
+          },
+        },
         user: { select: { id: true, name: true, avatar: true, phone: true } },
         address: true,
         payment: true,
@@ -294,7 +344,9 @@ export class BookingsService {
     // actively assigned to them. Once it's finished (completed/cancelled/
     // rejected) or not yet accepted by anyone, strip personal contact info.
     const sanitized =
-      requesterRole === 'WORKER' ? this.redactCustomerContact(booking) : booking;
+      requesterRole === 'WORKER'
+        ? this.redactCustomerContact(booking)
+        : booking;
 
     return { data: withBookingAlias(sanitized) };
   }
@@ -304,7 +356,10 @@ export class BookingsService {
    * Used to let a worker preview a still-open job request (to decide whether
    * to accept/decline) without exposing arbitrary bookings to every worker.
    */
-  private async workerOffersAnyService(workerId: string, serviceIds: string[]): Promise<boolean> {
+  private async workerOffersAnyService(
+    workerId: string,
+    serviceIds: string[],
+  ): Promise<boolean> {
     if (serviceIds.length === 0) return false;
     const match = await this.prisma.workerService.findFirst({
       where: { workerId, serviceId: { in: serviceIds } },
@@ -319,9 +374,14 @@ export class BookingsService {
    * CANCELLED, REJECTED) should not expose the customer's personal
    * contact info to the worker.
    */
-  private redactCustomerContact<T extends { status: string; user?: any }>(booking: T): T {
+  private redactCustomerContact<T extends { status: string; user?: any }>(
+    booking: T,
+  ): T {
     const activeStatuses = [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS];
-    if (!booking.user || activeStatuses.includes(booking.status as BookingStatus)) {
+    if (
+      !booking.user ||
+      activeStatuses.includes(booking.status as BookingStatus)
+    ) {
       return booking;
     }
     return {
@@ -331,7 +391,9 @@ export class BookingsService {
   }
 
   async acceptBooking(bookingId: string, workerId: string) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
     if (!booking) throw new NotFoundException('Booking not found');
     if (booking.status !== BookingStatus.PENDING) {
       throw new BadRequestException('Booking is no longer available');
@@ -360,7 +422,9 @@ export class BookingsService {
   }
 
   async rejectBooking(bookingId: string, workerId: string) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
     if (!booking) throw new NotFoundException('Booking not found');
 
     // Case 1: worker is declining a still-open, unassigned job request shown
@@ -381,7 +445,10 @@ export class BookingsService {
     // goes back into the pool for other matching workers, instead of
     // REJECTED which is a terminal status that never resurfaces in the
     // "available jobs" query.
-    if (booking.status === BookingStatus.ACCEPTED && booking.workerId === workerId) {
+    if (
+      booking.status === BookingStatus.ACCEPTED &&
+      booking.workerId === workerId
+    ) {
       const fullBooking = await this.prisma.booking.update({
         where: { id: bookingId },
         data: { status: BookingStatus.PENDING, workerId: null },
@@ -454,10 +521,18 @@ export class BookingsService {
     const netAmount = booking.finalAmount - commission;
 
     await this.prisma.earning.create({
-      data: { workerId, bookingId, amount: booking.finalAmount, commission, netAmount },
+      data: {
+        workerId,
+        bookingId,
+        amount: booking.finalAmount,
+        commission,
+        netAmount,
+      },
     });
 
-    const workerWallet = await this.prisma.workerWallet.findUnique({ where: { workerId } });
+    const workerWallet = await this.prisma.workerWallet.findUnique({
+      where: { workerId },
+    });
     if (workerWallet) {
       await this.prisma.workerWallet.update({
         where: { workerId },
@@ -497,12 +572,16 @@ export class BookingsService {
     reason: string,
     refundTo?: 'ORIGINAL' | 'WALLET',
   ) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
     if (!booking) throw new NotFoundException('Booking not found');
 
     const cancellableStatuses = [BookingStatus.PENDING, BookingStatus.ACCEPTED];
     if (!cancellableStatuses.includes(booking.status as BookingStatus)) {
-      throw new BadRequestException('Booking cannot be cancelled at this stage');
+      throw new BadRequestException(
+        'Booking cannot be cancelled at this stage',
+      );
     }
 
     if (booking.userId !== requesterId && booking.workerId !== requesterId) {
