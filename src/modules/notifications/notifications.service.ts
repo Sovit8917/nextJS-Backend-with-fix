@@ -64,12 +64,29 @@ export class NotificationsService {
       pushData.bookingId = String(data.extraData.bookingId);
     if (data.imageUrl) pushData.imageUrl = data.imageUrl;
 
-    await this.pushService.sendToToken(recipient.fcmToken, {
+    const result = await this.pushService.sendToToken(recipient.fcmToken, {
       title: data.title,
       body: data.body,
       data: pushData,
       imageUrl: data.imageUrl,
     });
+
+    if (result.invalidToken) {
+      // Token is dead (app uninstalled, token rotated, etc.) — clear it so
+      // we stop trying to send to it. The device will register a fresh
+      // token next time the app opens and calls updateFcmToken again.
+      if (data.userId) {
+        await this.prisma.user.update({
+          where: { id: data.userId },
+          data: { fcmToken: null },
+        });
+      } else if (data.workerId) {
+        await this.prisma.worker.update({
+          where: { id: data.workerId },
+          data: { fcmToken: null },
+        });
+      }
+    }
   }
 
   async getUserNotifications(userId: string, page = 1, limit = 20) {
@@ -181,14 +198,28 @@ export class NotificationsService {
     void Promise.allSettled(
       recipients
         .filter((r) => r.fcmToken)
-        .map((r) =>
-          this.pushService.sendToToken(r.fcmToken, {
+        .map(async (r) => {
+          const result = await this.pushService.sendToToken(r.fcmToken, {
             title: data.title,
             body: data.body,
             data: pushData,
             imageUrl: data.imageUrl,
-          }),
-        ),
+          });
+
+          if (result.invalidToken) {
+            if (r.userId) {
+              await this.prisma.user.update({
+                where: { id: r.userId },
+                data: { fcmToken: null },
+              });
+            } else if (r.workerId) {
+              await this.prisma.worker.update({
+                where: { id: r.workerId },
+                data: { fcmToken: null },
+              });
+            }
+          }
+        }),
     );
 
     return {

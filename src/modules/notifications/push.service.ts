@@ -34,10 +34,21 @@ export class PushService implements OnModuleInit {
     this.enabled = true;
   }
 
+  // FCM error codes that mean the token is permanently dead and should
+  // be removed from the DB so we stop retrying it forever.
+  private static readonly INVALID_TOKEN_ERROR_CODES = new Set([
+    'messaging/registration-token-not-registered',
+    'messaging/invalid-registration-token',
+    'messaging/invalid-argument',
+  ]);
+
   /**
    * Sends a push notification to a single device token.
    * Uses DATA-ONLY messages so Notifee is responsible for displaying
    * the notification and duplicate notifications are avoided.
+   *
+   * Returns whether the token turned out to be invalid/expired, so the
+   * caller can clear it from the DB (see NotificationsService.dispatchPush).
    */
   async sendToToken(
     token: string | null | undefined,
@@ -47,8 +58,8 @@ export class PushService implements OnModuleInit {
       data?: Record<string, string>;
       imageUrl?: string;
     },
-  ): Promise<void> {
-    if (!this.enabled || !token) return;
+  ): Promise<{ sent: boolean; invalidToken: boolean }> {
+    if (!this.enabled || !token) return { sent: false, invalidToken: false };
 
     try {
       await admin.messaging().send({
@@ -76,9 +87,24 @@ export class PushService implements OnModuleInit {
           },
         },
       });
+
+      return { sent: true, invalidToken: false };
     } catch (err: any) {
-      // Token expired, app uninstalled, etc.
-      this.logger.warn(`Push send failed: ${err?.message ?? err}`);
+      const code = err?.code as string | undefined;
+      const invalidToken = code
+        ? PushService.INVALID_TOKEN_ERROR_CODES.has(code)
+        : false;
+
+      if (invalidToken) {
+        this.logger.warn(
+          `Push token invalid/expired (${code}) — will clear it.`,
+        );
+      } else {
+        // Transient failure (network blip, throttling, etc.) — keep the token.
+        this.logger.warn(`Push send failed: ${err?.message ?? err}`);
+      }
+
+      return { sent: false, invalidToken };
     }
   }
 }
