@@ -11,7 +11,10 @@ export const configValidationSchema = Joi.object({
 
   TWILIO_ACCOUNT_SID: Joi.string().required(),
   TWILIO_AUTH_TOKEN: Joi.string().required(),
-  TWILIO_PHONE_NUMBER: Joi.string().required(),
+  // Used by Twilio Verify (OTP send/check).
+  TWILIO_VERIFY_SERVICE_SID: Joi.string().required(),
+  // No longer used now that OTP goes through Twilio Verify instead of raw SMS.
+  TWILIO_PHONE_NUMBER: Joi.string().allow('').optional(),
 
   RAZORPAY_KEY_ID: Joi.string().required(),
   RAZORPAY_KEY_SECRET: Joi.string().required(),
@@ -22,7 +25,9 @@ export const configValidationSchema = Joi.object({
   AWS_S3_BUCKET: Joi.string().required(),
 
   PORT: Joi.number().default(3000),
-  NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+  NODE_ENV: Joi.string()
+    .valid('development', 'production', 'test')
+    .default('development'),
   FRONTEND_URL: Joi.string().default('http://localhost:3001'),
 
   DEFAULT_COMMISSION_PERCENT: Joi.number().default(20),
@@ -34,5 +39,7 @@ export const configValidationSchema = Joi.object({
   FIREBASE_PRIVATE_KEY: Joi.string().allow('').optional(),
 
   GEMINI_API_KEY: Joi.string().allow('').optional(),
-  GEMINI_MODEL: Joi.string().default('gemini-2.5-flash'),
+  // gemini-2.5-flash was retired for new API keys — gemini-flash-latest
+  // auto-tracks Google's current recommended Flash model.
+  GEMINI_MODEL: Joi.string().default('gemini-flash-latest'),
 });

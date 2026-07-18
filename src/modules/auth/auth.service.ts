@@ -32,65 +32,53 @@ export class AuthService {
   }
 
   async sendOtp(dto: SendOtpDto) {
-    const otp = this.generateOtp();
-    const expiresAt = new Date(Date.now() + Number(this.config.get('OTP_EXPIRY_MINUTES', 10)) * 60 * 1000);
+    const bypassOtp = this.config.get('OTP_BYPASS');
 
-    // Save OTP to DB
-    await this.prisma.otp.create({
-      data: { phone: dto.phone, otp, expiresAt },
-    });
-
-    // Send via Twilio (skip in dev if bypass configured)
-    if (this.config.get('NODE_ENV') !== 'development') {
-      try {
-        await this.twilioClient.messages.create({
-          body: `Your OTP for Home Service is: ${otp}. Valid for ${this.config.get('OTP_EXPIRY_MINUTES', 10)} minutes.`,
-          from: this.config.get('TWILIO_PHONE_NUMBER'),
-          to: dto.phone,
-        });
-      } catch (err: any) {
-        // Twilio error codes worth knowing while debugging "OTP not received":
-        //  21211 - invalid 'to' phone number (missing/wrong country code)
-        //  21608 - unverified number on a Twilio trial account
-        //  21610 - recipient has unsubscribed from messages
-        //  21614 - not a valid SMS-capable number
-        // Also check DLT/sender-ID registration if targeting Indian numbers —
-        // carriers block undelivered messages silently regardless of Twilio's
-        // own status, and Twilio itself will not throw for that case.
-        this.logger.error(
-          `Twilio OTP send failed for ${dto.phone}: [${err?.code}] ${err?.message}`,
-        );
-        throw new BadRequestException(
-          'Failed to send OTP. Please check the phone number and try again.',
-        );
-      }
+    // Bypass Twilio entirely in dev/testing — nothing is sent, the frontend
+    // is expected to submit OTP_BYPASS as the code in verifyOtp().
+    if (bypassOtp) {
+      return {
+        message: 'OTP sent successfully',
+        ...(this.config.get('NODE_ENV') === 'development' && { otp: bypassOtp }),
+      };
     }
 
-    return {
-      message: 'OTP sent successfully',
-      // Only expose in dev
-      ...(this.config.get('NODE_ENV') === 'development' && { otp }),
-    };
+    // Send via Twilio Verify — Verify generates, stores, and expires the
+    // code on Twilio's side (handles A2P 10DLC compliance for us too), so
+    // we don't manage our own otp table or expiry for this path.
+    const verifyServiceSid = this.config.get('TWILIO_VERIFY_SERVICE_SID');
+    try {
+      await this.twilioClient.verify.v2
+        .services(verifyServiceSid)
+        .verifications.create({ to: dto.phone, channel: 'sms' });
+    } catch (err: any) {
+      // Twilio Verify error codes worth knowing while debugging "OTP not received":
+      //  60200 - invalid 'to' phone number (missing/wrong country code)
+      //  60203 - max send attempts reached for this number
+      //  60212 - too many concurrent requests for this number
+      this.logger.error(
+        `Twilio Verify send failed for ${dto.phone}: [${err?.code}] ${err?.message}`,
+      );
+      throw new BadRequestException(
+        'Failed to send OTP. Please check the phone number and try again.',
+      );
+    }
+
+    return { message: 'OTP sent successfully' };
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
     const role = dto.role || Role.CUSTOMER;
 
-    // Bypass OTP for development
+    // Bypass OTP for development/testing — always takes priority, no
+    // Twilio call made at all when the submitted code matches.
     const bypassOtp = this.config.get('OTP_BYPASS');
     const isValid =
-      dto.otp === bypassOtp ||
-      (await this.validateOtp(dto.phone, dto.otp));
+      dto.otp === bypassOtp || (await this.checkVerifyOtp(dto.phone, dto.otp));
 
     if (!isValid) {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
-
-    // Mark OTP as used
-    await this.prisma.otp.updateMany({
-      where: { phone: dto.phone, otp: dto.otp, verified: false },
-      data: { verified: true },
-    });
 
     if (role === Role.WORKER) {
       return this.handleWorkerAuth(dto.phone);
@@ -129,17 +117,21 @@ export class AuthService {
     return { message: 'Login successful', data: { token, worker, isNew } };
   }
 
-  private async validateOtp(phone: string, otp: string): Promise<boolean> {
-    const record = await this.prisma.otp.findFirst({
-      where: {
-        phone,
-        otp,
-        verified: false,
-        expiresAt: { gte: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    return !!record;
+  private async checkVerifyOtp(phone: string, otp: string): Promise<boolean> {
+    const verifyServiceSid = this.config.get('TWILIO_VERIFY_SERVICE_SID');
+    try {
+      const check = await this.twilioClient.verify.v2
+        .services(verifyServiceSid)
+        .verificationChecks.create({ to: phone, code: otp });
+      return check.status === 'approved';
+    } catch (err: any) {
+      // Twilio throws (rather than returning a status) for things like an
+      // already-checked or fully expired verification — treat as invalid.
+      this.logger.warn(
+        `Twilio Verify check failed for ${phone}: [${err?.code}] ${err?.message}`,
+      );
+      return false;
+    }
   }
 
   async adminLogin(dto: AdminLoginDto) {
@@ -165,10 +157,6 @@ export class AuthService {
   const token = this.generateToken(admin.id, admin.role);
   return { message: 'Login successful', data: { token, user: admin } };
 }
-
-  private generateOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  }
 
   private generateToken(id: string, role: string): string {
     return this.jwtService.sign({ sub: id, role });

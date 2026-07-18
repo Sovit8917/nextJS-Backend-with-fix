@@ -21,7 +21,9 @@ export default () => ({
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID,
     authToken: process.env.TWILIO_AUTH_TOKEN,
-    phoneNumber: process.env.TWILIO_PHONE_NUMBER,
+    // No longer used now that OTP goes through Twilio Verify instead of raw SMS.
+    phoneNumber: process.env.TWILIO_PHONE_NUMBER || '',
+    verifyServiceSid: process.env.TWILIO_VERIFY_SERVICE_SID,
   },
 
   razorpay: {
@@ -44,14 +46,23 @@ export default () => ({
   },
 
   business: {
-    commissionPercent: parseInt(process.env.DEFAULT_COMMISSION_PERCENT || '20', 10),
+    commissionPercent: parseInt(
+      process.env.DEFAULT_COMMISSION_PERCENT || '20',
+      10,
+    ),
     taxPercent: parseInt(process.env.TAX_PERCENT || '18', 10),
     otpExpiryMinutes: parseInt(process.env.OTP_EXPIRY_MINUTES || '10', 10),
     otpBypass: process.env.OTP_BYPASS || '',
   },
-retention: {
-    notificationDays: parseInt(process.env.NOTIFICATION_RETENTION_DAYS || '7', 10),
+  retention: {
+    notificationDays: parseInt(
+      process.env.NOTIFICATION_RETENTION_DAYS || '7',
+      10,
+    ),
     chatDays: parseInt(process.env.CHAT_RETENTION_DAYS || '30', 10),
-    pendingBookingDays: parseInt(process.env.PENDING_BOOKING_RETENTION_DAYS || '10', 10),
+    pendingBookingDays: parseInt(
+      process.env.PENDING_BOOKING_RETENTION_DAYS || '10',
+      10,
+    ),
   },
 });
