@@ -63,9 +63,14 @@ enum SubscriptionStatus {
 
 model User {
   id            String    @id @default(uuid())
-  phone         String    @unique
+  // Optional now — Google/email-password signups via the customer website
+  // (Better Auth) won't have a phone at signup time, unlike the mobile
+  // app's phone-OTP-only flow. Still unique when present (Postgres allows
+  // multiple NULLs under a unique constraint, so this is safe).
+  phone         String?   @unique
   email         String?   @unique
-  password      String?  
+  emailVerified Boolean   @default(false)
+  password      String?
   name          String?
   avatar        String?
   role          Role      @default(CUSTOMER)
@@ -86,6 +91,51 @@ model User {
   otps          Otp[]
   pendingBookings PendingBooking[]
   subscriptions   UserSubscription[]
+  // Better Auth (customer website Google/email-password login)
+  accounts      Account[]
+  sessions      Session[]
+}
+
+/// Better Auth tables below — managed by the customer website's Better
+/// Auth instance (Google + email/password login), sharing this same
+/// database/User table so a customer has one account across mobile
+/// (phone OTP) and web (Google/email-password).
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model Verification {
+  id         String    @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
 }
 
 model Worker {

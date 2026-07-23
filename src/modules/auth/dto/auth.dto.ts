@@ -42,3 +42,17 @@ export class AdminLoginDto {
   @IsNotEmpty()
   password: string;
 }
+
+/**
+ * Used only by the customer website's server-side Better Auth bridge
+ * (never called from a browser) — after Better Auth confirms a Google
+ * or email/password login and upserts the shared User row, the website's
+ * server calls this to get a NestJS-compatible JWT for that same user id.
+ * Protected by a shared internal secret header, not a user JWT.
+ */
+export class SessionTokenDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  userId: string;
+}

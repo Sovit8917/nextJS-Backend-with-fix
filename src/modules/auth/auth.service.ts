@@ -162,6 +162,34 @@ export class AuthService {
     return this.jwtService.sign({ sub: id, role });
   }
 
+  /**
+   * Issues a NestJS-compatible JWT for a user id that the customer
+   * website's Better Auth instance has already authenticated (Google or
+   * email/password) and upserted into the shared User table. The caller
+   * (auth.controller.ts) is responsible for verifying the internal
+   * shared-secret header before calling this — this method itself does
+   * no auth of its own, so it must never be reachable without that check.
+   */
+  async issueSessionToken(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.isBlocked || !user.isActive) {
+      throw new UnauthorizedException('Account is disabled');
+    }
+
+    // Customers who sign up via Google/email on the website won't have a
+    // wallet yet (unlike phone-OTP signups, which create one in
+    // handleUserAuth) — create it lazily here on first bridge call so
+    // wallet-dependent features (bookings, payments) work the same way.
+    if (user.role === Role.CUSTOMER) {
+      const wallet = await this.prisma.wallet.findUnique({ where: { userId: user.id } });
+      if (!wallet) await this.prisma.wallet.create({ data: { userId: user.id } });
+    }
+
+    const token = this.generateToken(user.id, user.role);
+    return { data: { token, user } };
+  }
+
   async refreshToken(userId: string, role: string) {
     const token = this.generateToken(userId, role);
     return { data: { token } };

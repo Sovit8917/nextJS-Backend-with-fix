@@ -42,4 +42,9 @@ export const configValidationSchema = Joi.object({
   // gemini-2.5-flash was retired for new API keys — gemini-flash-latest
   // auto-tracks Google's current recommended Flash model.
   GEMINI_MODEL: Joi.string().default('gemini-flash-latest'),
+
+  // Shared secret between this backend and the customer website's
+  // server-side Better Auth bridge (/auth/session-token). Generate with:
+  // openssl rand -hex 32 — must match exactly on both sides.
+  INTERNAL_AUTH_SECRET: Joi.string().min(32).required(),
 });
